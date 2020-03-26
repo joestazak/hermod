@@ -12,8 +12,10 @@
 # first: Indicates that this is a new MUT and requires a completely fresh deployment. Defaults to false.
 # nofe: Turns OFF the front end deployment.
 # nobe: Turns OFF the back end deployment.
-# flf: Folder location for front end. Defaults to /hart. You can also perma change it below.
-# flb: Folder location for back end. Defaults to /ada. You can also perma change it below.
+# rflf: Folder location for remote front end. Defaults to /hart. You can also perma change it below.
+# rflb: Folder location for remote back end. Defaults to /ada. You can also perma change it below. 
+# lflf: Folder location for local front end. Defaults to /hart. You can also perma change it below.
+# lflb: Folder location for local back end. Defaults to /ada. You can also perma change it below. 
 # ** mut: MUT IP address to use. You can enter just the final octet (Ex: "255" will make 10.70.0.255)
 #         or you can enter the full IP address (Ex: "10.70.0.255" will make 10.70.0.255)
 # ** p: Password for sudo commands on whatever MUT you are accessing.
@@ -26,13 +28,15 @@
 #
 
 # !!! Set the following to your AWS user name before running! You can set the password here or through the p option.
-USER="connor"
-PASS="Condogg5"
+USER="joe"
+PASS=""
 
 # Default variables
 MUT_IP="null"
-FLF="hart"
-FLB="ada"
+RFLF="hart"
+RFLB="ada"
+LFLF="ahalogy-repos/hart"
+LFLB="ahalogy-repos/ada"
 FE=true
 BE=true
 FIRST=false
@@ -64,13 +68,23 @@ while [ -n "$1" ]; do
 		BE=false
 		;;
 
-  -flf)
-    FLF="$2"
+  -rflf)
+    RFLF="$2"
     shift
     ;;
 
-	-flb)
-    FLB="$2"
+	-rflb)
+    RFLB="$2"
+    shift
+    ;;
+
+  -lflf)
+    LFLF="$2"
+    shift
+    ;;
+
+  -lflb)
+    LFLB="$2"
     shift
     ;;
 
@@ -104,7 +118,7 @@ echo "MUT IP has been set to $MUT_IP"
 
 # Deletes a big log file that can become a problem on first MUT deployment.
 if [ "$FIRST" = true ] ; then
-  ssh -t $USER@$MUT_IP "sudo rm -rf /var/log/mysql/import-ahalogy.log"
+  echo $PASS | ssh -tt $USER@$MUT_IP "sudo rm -rf /var/log/mysql/import-ahalogy.log"
 fi
 
 # Prep and deploy the back end.
@@ -112,14 +126,14 @@ if [ "$BE" = true ] ; then
   echo "Deploying back end to $MUT_IP"
 
   echo "Removing old ada on MUT..."
-  ssh -t $USER@$MUT_IP "sudo rm -rf ada"
+  echo $PASS | ssh -tt $USER@$MUT_IP "sudo -u $USER bash -c rm -rf ada"
   echo "Old ada removed."
 
   echo "Syncing new ada and deploying..."
-  cd "$HOME/$FLB"
+  cd "$HOME/$LFLB"
   mvn clean
-  rsync -avz --exclude '.git' ~/ada $USER@$MUT_IP:
-  ssh -t $USER@$MUT_IP "echo $PASS | sudo -S ./ada/deploy/deploybe.sh"
+  rsync -avz --exclude '.git' "$HOME/$LFLB" $USER@$MUT_IP:
+  ECHO $PASS | ssh -tt $USER@$MUT_IP "sudo -u $USER bash -c ~/ada/deploy/deploybe.sh"
 
   echo "Back end deployed!"
 fi
@@ -128,17 +142,43 @@ fi
 if [ "$FE" = true ] ; then
   echo "Deploying front end to $MUT_IP"
 
-  cd "$HOME/$FLF"
+  cd "$HOME/$LFLF"
   sed -i '' "s/10.70.0.*/$MUT_IP:8080';/" config/environment.js
   ember build --environment=mut
-  rsync -avz ~/hart/dist $USER@$MUT_IP:
+  rsync -avz dist $USER@$MUT_IP:
 
-  ssh -t $USER@$MUT_IP "echo $PASS | sudo -S sed -i '166 s/AllowOverride None/AllowOverride All/' /etc/apache2/apache2.conf"
-  ssh -t $USER@$MUT_IP "echo $PASS | sudo -S  rm -rf /var/www/html"
-  ssh -t $USER@$MUT_IP "echo $PASS | sudo -S  mv ~/dist /var/www/"
-  ssh -t $USER@$MUT_IP "echo $PASS | sudo -S  mv /var/www/dist /var/www/html"
-  ssh -t $USER@$MUT_IP "echo $PASS | sudo -S  echo '# place in [app]/public so it gets compiled into the dist folder\nOptions FollowSymLinks\n<IfModule mod_rewrite.c>\nRewriteEngine On\nRewriteRule ^index\.html$ - [L]\nRewriteCond %{REQUEST_FILENAME} !-f\nRewriteCond %{REQUEST_FILENAME} !-d\nRewriteRule (.*) index.html [L]\n</IfModule>\n<filesMatch \"\.(html|htm|js|css)$\">\nFileETag None\n<ifModule mod_headers.c> \nHeader unset ETag\nHeader set Cache-Control \"max-age=0, no-cache, no-store, must-revalidate\"\nHeader set Pragma \"no-cache\"\nHeader set Expires \"Wed, 11 Jan 1984 05:00:00 GMT\"\n</ifModule>\n</filesMatch>' > /var/www/html/.htaccess"
-  ssh -t $USER@$MUT_IP "echo $PASS | sudo service apache2 restart"
+  if [ "$FIRST" = false ] ; then
+    echo $PASS | ssh -tt $USER@$MUT_IP "sudo mv /var/www/html/.htaccess /var/www/"
+  fi
+
+  echo $PASS | ssh -tt $USER@$MUT_IP "sudo sed -i '166 s/AllowOverride None/AllowOverride All/' /etc/apache2/apache2.conf && sudo rm -rf /var/www/html && sudo mv ~/dist /var/www/html && sudo service apache2 restart"
+
+  echo "$FIRST"
+  if [ "$FIRST" = true ] ; then
+    ssh -t $USER@$MUT_IP 'cat > /var/www/html/.htaccess <<- "EOF"
+    # place in [app]/public so it gets compiled into the dist folder
+    Options FollowSymLinks
+    <IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteRule ^index\.html$ - [L]
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteRule (.*) index.html [L]
+    </IfModule>
+    <filesMatch "\.(html|htm|js|css)$">
+      FileETag None
+      <ifModule mod_headers.c>
+        Header unset ETag
+        Header set Cache-Control "max-age=0, no-cache, no-store, must-revalidate"
+        Header set Pragma "no-cache"
+        Header set Expires "Wed, 11 Jan 1984 05:00:00 GMT"
+      </ifModule>
+    </filesMatch>
+EOF
+    '
+  else
+    echo $PASS | ssh -tt $USER@$MUT_IP "sudo mv /var/www/.htaccess /var/www/html/"
+  fi
 
   echo "Front end deployed!"
 fi
@@ -147,9 +187,7 @@ fi
 # Prep and deploy the CMS command file.
 if [ "$CMS" = true ] ; then
   echo "Deploying CMS command to $MUT_IP"
-  cd "$HOME/$FLB"
-
-  ssh -t $USER@$MUT_IP "echo $PASS | sudo -S rm -rf cms-common-1.0-SNAPSHOT-jar-with-dependencies.jar "
+  cd "$HOME/$LFLB"
 
   mvn clean
   mvn package -DskipTests
