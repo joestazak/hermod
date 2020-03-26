@@ -147,38 +147,29 @@ if [ "$FE" = true ] ; then
   ember build --environment=mut
   rsync -avz dist $USER@$MUT_IP:
 
-  if [ "$FIRST" = false ] ; then
-    echo $PASS | ssh -tt $USER@$MUT_IP "sudo mv /var/www/html/.htaccess /var/www/"
-  fi
-
   echo $PASS | ssh -tt $USER@$MUT_IP "sudo sed -i '166 s/AllowOverride None/AllowOverride All/' /etc/apache2/apache2.conf && sudo rm -rf /var/www/html && sudo mv ~/dist /var/www/html && sudo service apache2 restart"
 
-  echo "$FIRST"
-  if [ "$FIRST" = true ] ; then
-    ssh -t $USER@$MUT_IP 'cat > /var/www/html/.htaccess <<- "EOF"
-    # place in [app]/public so it gets compiled into the dist folder
-    Options FollowSymLinks
-    <IfModule mod_rewrite.c>
-    RewriteEngine On
-    RewriteRule ^index\.html$ - [L]
-    RewriteCond %{REQUEST_FILENAME} !-f
-    RewriteCond %{REQUEST_FILENAME} !-d
-    RewriteRule (.*) index.html [L]
-    </IfModule>
-    <filesMatch "\.(html|htm|js|css)$">
-      FileETag None
-      <ifModule mod_headers.c>
-        Header unset ETag
-        Header set Cache-Control "max-age=0, no-cache, no-store, must-revalidate"
-        Header set Pragma "no-cache"
-        Header set Expires "Wed, 11 Jan 1984 05:00:00 GMT"
-      </ifModule>
-    </filesMatch>
+  ssh -t $USER@$MUT_IP 'cat > /var/www/html/.htaccess <<- "EOF"
+  # place in [app]/public so it gets compiled into the dist folder
+  Options FollowSymLinks
+  <IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteRule ^index\.html$ - [L]
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteCond %{REQUEST_FILENAME} !-d
+  RewriteRule (.*) index.html [L]
+  </IfModule>
+  <filesMatch "\.(html|htm|js|css)$">
+    FileETag None
+    <ifModule mod_headers.c>
+      Header unset ETag
+      Header set Cache-Control "max-age=0, no-cache, no-store, must-revalidate"
+      Header set Pragma "no-cache"
+      Header set Expires "Wed, 11 Jan 1984 05:00:00 GMT"
+    </ifModule>
+  </filesMatch>
 EOF
     '
-  else
-    echo $PASS | ssh -tt $USER@$MUT_IP "sudo mv /var/www/.htaccess /var/www/html/"
-  fi
 
   echo "Front end deployed!"
 fi
@@ -191,7 +182,7 @@ if [ "$CMS" = true ] ; then
 
   mvn clean
   mvn package -DskipTests
-  scp cms-common/target/cms-common-1.0-SNAPSHOT-jar-with-dependencies.jar $USER@$MUT_IP:
+  rsync -avz cms-common/target/cms-common-1.0-SNAPSHOT-jar-with-dependencies.jar $USER@$MUT_IP:
   echo "CMS command file is ready on MUT $MUT_IP!"
 fi
 
